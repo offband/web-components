@@ -1,5 +1,10 @@
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 20;
+export const CACHE_SCHEMA_VERSION = 1;
+export const CACHE_FRESH_TTL_MS = 30 * 60 * 1000;
+export const CACHE_STALE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CACHE_PREFIX = 'offband:github-activity';
+const RETRY_DELAY_MS = 100;
 const ACCOUNT_PATTERN = /^(?!-)[a-z0-9-]{1,39}(?<!-)$/i;
 const REPO_PATTERN = /^(?!\.{1,2}$)[a-z0-9._-]{1,100}$/i;
 const stylesheetUrl = new URL('./github-activity.css', import.meta.url);
@@ -27,6 +32,12 @@ export function parseLimit(value) {
   const parsed = Number.parseInt(String(value || ''), 10);
   if (!Number.isFinite(parsed)) return DEFAULT_LIMIT;
   return Math.max(1, Math.min(parsed, MAX_LIMIT));
+}
+
+export function activityCacheKey({ account, repos, limit = DEFAULT_LIMIT }) {
+  const safeAccount = parseAccount(account).toLowerCase();
+  const safeRepos = parseRepos(repos).map((repo) => repo.toLowerCase()).sort();
+  return `${CACHE_PREFIX}:v${CACHE_SCHEMA_VERSION}:${safeAccount}:${safeRepos.join(',')}:${parseLimit(limit)}`;
 }
 
 export function relativeTime(value, now = Date.now()) {
@@ -83,7 +94,44 @@ export function repoCommitsUrl(account, repo, limit) {
   return url.href;
 }
 
-export async function fetchActivity({ account, repos, limit = DEFAULT_LIMIT, signal, fetchImpl = fetch }) {
+function transientFailure(error) {
+  return error?.transient === true || error instanceof TypeError;
+}
+
+async function fetchRepository({ account, repo, limit, signal, fetchImpl, sleep, random }) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetchImpl(repoCommitsUrl(account, repo, limit), {
+        signal,
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28'
+        }
+      });
+      if (!response.ok) {
+        const error = new Error(`${repo}: GitHub returned ${response.status}`);
+        error.transient = response.status >= 500 && response.status <= 599;
+        throw error;
+      }
+      const payload = await response.json();
+      if (!Array.isArray(payload)) throw new Error(`${repo}: invalid GitHub response`);
+      return payload.map((commit) => normalizeCommit(account, repo, commit)).filter(Boolean);
+    } catch (error) {
+      if (error?.name === 'AbortError' || attempt || !transientFailure(error)) throw error;
+      await sleep(RETRY_DELAY_MS + Math.floor(random() * RETRY_DELAY_MS));
+    }
+  }
+}
+
+export async function fetchActivity({
+  account,
+  repos,
+  limit = DEFAULT_LIMIT,
+  signal,
+  fetchImpl = fetch,
+  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  random = Math.random
+}) {
   const safeAccount = parseAccount(account);
   const safeRepos = parseRepos(repos);
   const safeLimit = parseLimit(limit);
@@ -92,19 +140,9 @@ export async function fetchActivity({ account, repos, limit = DEFAULT_LIMIT, sig
     throw new TypeError('GitHub activity requires a valid account and at least one explicit repository.');
   }
 
-  const requests = safeRepos.map(async (repo) => {
-    const response = await fetchImpl(repoCommitsUrl(safeAccount, repo, safeLimit), {
-      signal,
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28'
-      }
-    });
-    if (!response.ok) throw new Error(`${repo}: GitHub returned ${response.status}`);
-    const payload = await response.json();
-    if (!Array.isArray(payload)) throw new Error(`${repo}: invalid GitHub response`);
-    return payload.map((commit) => normalizeCommit(safeAccount, repo, commit)).filter(Boolean);
-  });
+  const requests = safeRepos.map((repo) => fetchRepository({
+    account: safeAccount, repo, limit: safeLimit, signal, fetchImpl, sleep, random
+  }));
 
   const settled = await Promise.allSettled(requests);
   const failedRepos = [];
@@ -124,6 +162,72 @@ export async function fetchActivity({ account, repos, limit = DEFAULT_LIMIT, sig
       .slice(0, safeLimit),
     failedRepos
   };
+}
+
+function validCachedItem(item, account, repos) {
+  if (!repos.some((repo) => repo.toLowerCase() === String(item?.repo || '').toLowerCase())) return null;
+  return normalizeCommit(account, item.repo, {
+    sha: item.sha,
+    commit: { message: item.message, committer: { date: item.date } }
+  });
+}
+
+export function readActivityCache({ storage, key, account, repos, now = Date.now() }) {
+  if (!storage) return null;
+  try {
+    const record = JSON.parse(storage.getItem(key));
+    const savedAt = Date.parse(record?.savedAt);
+    if (record?.version !== CACHE_SCHEMA_VERSION || !Number.isFinite(savedAt) || now - savedAt > CACHE_STALE_TTL_MS) return null;
+    const safeRepos = parseRepos(repos);
+    const items = Array.isArray(record.items)
+      ? record.items.map((item) => validCachedItem(item, account, safeRepos)).filter(Boolean)
+      : [];
+    if (!items.length) return null;
+    const failedRepos = parseRepos(record.failedRepos).filter((failed) =>
+      safeRepos.some((repo) => repo.toLowerCase() === failed.toLowerCase()));
+    return { items, failedRepos, savedAt, fresh: now - savedAt <= CACHE_FRESH_TTL_MS };
+  } catch {
+    return null;
+  }
+}
+
+export function writeActivityCache({ storage, key, result, now = Date.now() }) {
+  if (!storage || !result.items.length) return;
+  try {
+    storage.setItem(key, JSON.stringify({
+      version: CACHE_SCHEMA_VERSION,
+      savedAt: new Date(now).toISOString(),
+      items: result.items,
+      failedRepos: result.failedRepos
+    }));
+  } catch {
+    // Storage denial and quota errors must not affect rendering.
+  }
+}
+
+export async function loadActivity(options) {
+  const now = typeof options.now === 'function' ? options.now() : (options.now ?? Date.now());
+  let storage = options.storage;
+  if (storage === undefined) {
+    try {
+      storage = globalThis.localStorage;
+    } catch {
+      storage = null;
+    }
+  }
+  const key = activityCacheKey(options);
+  const cached = readActivityCache({ ...options, storage, key, now });
+  if (cached) options.onCached?.(cached);
+  if (cached?.fresh) return { ...cached, source: 'cache' };
+
+  try {
+    const result = await fetchActivity(options);
+    writeActivityCache({ storage, key, result, now });
+    return { ...result, source: 'live' };
+  } catch (error) {
+    if (cached) return { ...cached, source: 'stale', stale: true };
+    throw error;
+  }
 }
 
 function element(name, className, text) {
@@ -204,18 +308,21 @@ export class GitHubActivity extends HTMLElement {
     this.#renderState('loading', 'Loading recent GitHub activity…');
 
     try {
-      const result = await fetchActivity({
+      const result = await loadActivity({
         account: this.account,
         repos: this.repos,
         limit: this.limit,
-        signal: this.#controller.signal
+        signal: this.#controller.signal,
+        onCached: (cached) => {
+          if (request === this.#request) this.#renderItems(cached.items, cached.failedRepos, !cached.fresh);
+        }
       });
       if (request !== this.#request) return;
       if (!result.items.length) {
         this.#renderState('empty', 'No recent public commits were found.');
         return;
       }
-      this.#renderItems(result.items, result.failedRepos);
+      this.#renderItems(result.items, result.failedRepos, result.stale);
     } catch (error) {
       if (error?.name === 'AbortError' || request !== this.#request) return;
       this.#renderState('error', error instanceof TypeError
@@ -233,7 +340,7 @@ export class GitHubActivity extends HTMLElement {
     this.region.append(status);
   }
 
-  #renderItems(items, failedRepos) {
+  #renderItems(items, failedRepos, stale = false) {
     this.region.replaceChildren();
     this.region.dataset.state = 'ready';
     this.region.setAttribute('aria-busy', 'false');
@@ -258,6 +365,7 @@ export class GitHubActivity extends HTMLElement {
     });
 
     this.region.append(list);
+    if (stale) this.region.append(element('p', 'notice', 'Showing saved activity while GitHub is unavailable.'));
     if (failedRepos.length) {
       const note = element(
         'p',

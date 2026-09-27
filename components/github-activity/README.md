@@ -30,6 +30,21 @@ repositories do not expand the configured scope, and one failed repository does
 not suppress successful results from the others. If every configured repository
 fails, the component shows its error state.
 
+## Cache and resilience
+
+The component keeps a versioned result in `localStorage`, keyed by the normalized
+account, explicit repository list, and limit. Results are fresh for 30 minutes;
+fresh results render without a network request. Older results up to seven days
+old render immediately while GitHub is revalidated. If that request fails, the
+saved result remains visible. Entries older than seven days are ignored.
+
+Storage denial, private-mode restrictions, and quota errors are non-fatal. The
+component simply uses live requests. Network failures and GitHub 5xx responses
+receive one short jittered retry; 404 and other non-transient responses are not
+retried. Partial successes and their unavailable-repository notice are cached.
+There is no polling, server-side cache, generated snapshot, token, or repository
+discovery, and hosts do not configure the cache.
+
 ## States and accessibility
 
 The shadow DOM contains a labelled live region and an ordered list. Loading and
