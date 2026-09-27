@@ -1,0 +1,14 @@
+{
+  "name": "@offband/web-components",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check components/github-activity/github-activity.js && node --test",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,115 @@
+:host {
+  display: block;
+  color: var(--github-activity-color, #e8eaed);
+  font-family: var(--github-activity-font, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: var(--github-activity-font-size, 0.875rem);
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.activity {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--github-activity-border, #30363d);
+  border-radius: var(--github-activity-radius, 0.5rem);
+  background: var(--github-activity-background, #0d1117);
+}
+
+.list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.4fr) minmax(12rem, 1fr) auto;
+  gap: var(--github-activity-gap, 1rem);
+  align-items: baseline;
+  min-width: 0;
+  padding: var(--github-activity-item-padding, 1rem);
+  border-bottom: 1px solid var(--github-activity-border, #30363d);
+}
+
+.item:last-child {
+  border-bottom: 0;
+}
+
+.identity {
+  display: flex;
+  min-width: 0;
+  gap: 0.7rem;
+  align-items: baseline;
+}
+
+a {
+  text-underline-offset: 0.18em;
+}
+
+.sha {
+  flex: none;
+  color: var(--github-activity-accent, #ff7817);
+  font-weight: 800;
+}
+
+.repo {
+  overflow: hidden;
+  color: var(--github-activity-repo-color, #56d364);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--github-activity-color, #e8eaed);
+  text-decoration-color: transparent;
+}
+
+.message:hover,
+.message:focus-visible,
+.repo:hover,
+.repo:focus-visible {
+  text-decoration-color: currentColor;
+}
+
+.time {
+  color: var(--github-activity-muted-color, #8b949e);
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+
+.status,
+.notice {
+  margin: 0;
+  padding: var(--github-activity-item-padding, 1rem);
+  color: var(--github-activity-muted-color, #8b949e);
+}
+
+.notice {
+  border-top: 1px solid var(--github-activity-border, #30363d);
+  font-size: 0.82em;
+}
+
+.activity[data-state="error"] .status {
+  color: var(--github-activity-error-color, #ff7b72);
+}
+
+@media (max-width: 42rem) {
+  .item {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}

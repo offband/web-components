@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GitHub activity component example</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, sans-serif;
+      background: #080a0d;
+      color: #f3f4f6;
+    }
+
+    body {
+      max-width: 70rem;
+      margin: 0 auto;
+      padding: clamp(1rem, 5vw, 4rem);
+    }
+
+    h1 {
+      margin-bottom: 0.5rem;
+    }
+
+    p {
+      color: #aab0b8;
+    }
+
+    github-activity {
+      margin-top: 2rem;
+      --github-activity-background: #05070a;
+      --github-activity-border: #29313a;
+      --github-activity-accent: #ff8b3d;
+      --github-activity-repo-color: #67db83;
+    }
+  </style>
+  <script type="module" src="./github-activity.js"></script>
+</head>
+<body>
+  <main>
+    <h1>Recent public work</h1>
+    <p>This page has no dependency on an Offband website runtime or stylesheet.</p>
+    <github-activity
+      account="offband"
+      repos="sift,dredge,sitectl"
+      limit="4">
+    </github-activity>
+  </main>
+</body>
+</html>

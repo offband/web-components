@@ -50,6 +50,11 @@ Then open the component's `example.html` from `http://localhost:8000`. Examples
 must import only files from this repository and public services explicitly
 documented by the component.
 
+## Components
+
+- [`github-activity`](components/github-activity/README.md) renders recent
+  commits from an explicit list of public GitHub repositories.
+
 ## Public API and compatibility
 
 Component READMEs document supported attributes, matching JavaScript
